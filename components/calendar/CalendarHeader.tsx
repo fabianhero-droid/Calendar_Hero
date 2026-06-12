@@ -5,6 +5,20 @@ import { de } from "date-fns/locale";
 import { ChevronLeft, ChevronRight, Calendar, Plus } from "lucide-react";
 import { CalendarView } from "@/lib/types";
 import NotificationBell from "@/components/NotificationBell";
+import { useEffect, useState } from "react";
+
+function LiveClock() {
+  const [time, setTime] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setTime(new Date()), 30000);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <span className="text-xs font-semibold text-gray-500 tabular-nums">
+      {format(time, "HH:mm")}
+    </span>
+  );
+}
 
 interface Props {
   currentDate: Date;
@@ -55,6 +69,7 @@ export default function CalendarHeader({ currentDate, view, onNavigate, onToday,
           </span>
         )}
 
+        <LiveClock />
         <NotificationBell />
 
         <button onClick={onNewEvent}

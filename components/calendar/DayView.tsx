@@ -28,7 +28,7 @@ function NowIndicator() {
       setTop(((now.getHours() * 60 + now.getMinutes()) / 60) * SLOT_HEIGHT);
     }
     calc();
-    const t = setInterval(calc, 60000);
+    const t = setInterval(calc, 30000);
     return () => clearInterval(t);
   }, []);
   if (top === null) return null;
