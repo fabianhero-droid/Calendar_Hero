@@ -68,23 +68,33 @@ function detectDeleteIntent(msg: string): string | null {
 }
 
 function findMatchingEvents(query: string, events: CalendarEvent[]): CalendarEvent[] {
-  const lower = query.toLowerCase();
+  const lower = query.toLowerCase().trim();
+  const words = lower.split(/\s+/).filter((w) => w.length > 2);
 
   // Try to parse a date from the query
   const draft = parseNaturalLanguage(query);
   const targetDate = draft?.start ?? null;
 
   return events.filter((e) => {
-    const titleMatch = e.title.toLowerCase().includes(lower) ||
-      lower.split(" ").some((word) => word.length > 3 && e.title.toLowerCase().includes(word));
+    // Skip WebUntis school lessons unless explicitly named
+    if (e.id.startsWith("untis_")) {
+      return lower.includes(e.title.toLowerCase());
+    }
 
-    // Also check for date match
-    const dateMatch = targetDate ? isSameDay(parseISO(e.start), targetDate) : false;
+    const titleLower = e.title.toLowerCase();
 
-    // Skip WebUntis events unless explicitly named
-    if (e.id.startsWith("untis_") && !lower.includes(e.title.toLowerCase())) return false;
+    // Direct title match
+    if (titleLower.includes(lower)) return true;
 
-    return titleMatch || (dateMatch && lower.split(" ").some((w) => w.length > 3 && e.title.toLowerCase().includes(w)));
+    // Any word matches title
+    const wordMatch = words.some((w) => titleLower.includes(w));
+
+    // Date match: same day as parsed date AND any word in title
+    const dateMatch = targetDate
+      ? isSameDay(parseISO(e.start), targetDate) && wordMatch
+      : false;
+
+    return wordMatch || dateMatch;
   });
 }
 
@@ -97,6 +107,9 @@ function formatEventResponse(event: CalendarEvent): string {
 }
 
 export default function AIChat({ onEventAdded, onEventDeleted, events }: Props) {
+  const eventsRef = useRef<CalendarEvent[]>(events);
+  useEffect(() => { eventsRef.current = events; }, [events]);
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome",
@@ -127,7 +140,7 @@ export default function AIChat({ onEventAdded, onEventDeleted, events }: Props) 
     // --- DELETE intent ---
     const deleteQuery = detectDeleteIntent(msg);
     if (deleteQuery) {
-      const matches = findMatchingEvents(deleteQuery, events);
+      const matches = findMatchingEvents(deleteQuery, eventsRef.current);
 
       if (matches.length === 0) {
         setMessages((prev) => [...prev, {
