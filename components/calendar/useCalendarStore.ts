@@ -13,7 +13,10 @@ const useSupabase = !!(
 
 export function useCalendarStore() {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
-  const [view, setView] = useState<CalendarView>("month");
+  const [view, setView] = useState<CalendarView>(() => {
+    if (typeof window === "undefined") return "month";
+    return (localStorage.getItem("calendar_view") as CalendarView) ?? "week";
+  });
   const [currentDate, setCurrentDate] = useState(new Date());
   const [hydrated, setHydrated] = useState(false);
 
@@ -58,6 +61,11 @@ export function useCalendarStore() {
     if (useSupabase) await removeEvent(id).catch(console.error);
   }, []);
 
+  const setViewPersisted = useCallback((v: CalendarView) => {
+    localStorage.setItem("calendar_view", v);
+    setView(v);
+  }, []);
+
   const navigate = useCallback(
     (dir: -1 | 1) => {
       setCurrentDate((d) => {
@@ -74,7 +82,7 @@ export function useCalendarStore() {
   return {
     events,
     view,
-    setView,
+    setView: setViewPersisted,
     currentDate,
     setCurrentDate,
     navigate,
