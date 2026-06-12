@@ -142,14 +142,17 @@ export default function WebUntisSetup({ onEventsImported, existingEventIds }: Pr
         <div className="border-t border-gray-100 px-4 py-4 space-y-3 bg-gray-50/50">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-500">Schule (Kürzel)</label>
+              <label className="text-xs font-medium text-gray-500">Schule (URL-Kürzel)</label>
               <input
                 type="text"
-                placeholder="z.B. brgklu"
+                placeholder="z.B. htbla-steyr"
                 value={creds.school}
                 onChange={(e) => setCreds((c) => ({ ...c, school: e.target.value }))}
                 className="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-blue-400 bg-white transition-colors"
               />
+              <p className="text-[10px] text-blue-500">
+                WebUntis öffnen → URL → Wert nach <code className="bg-blue-50 px-1 rounded">?school=</code>
+              </p>
             </div>
             <div className="space-y-1">
               <label className="text-xs font-medium text-gray-500">Benutzername</label>

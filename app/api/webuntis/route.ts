@@ -28,7 +28,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Alle Felder sind erforderlich." }, { status: 400 });
     }
 
-    const untis = new WebUntis(school, username, password, server);
+    // Normalize school slug: remove spaces, try as-is first
+    const schoolSlug = school.trim();
+    const untis = new WebUntis(schoolSlug, username, password, server);
     await untis.login();
 
     const now = new Date();
@@ -91,9 +93,17 @@ export async function POST(req: NextRequest) {
     const message = err instanceof Error ? err.message : "Unbekannter Fehler";
     console.error("WebUntis error:", message);
 
-    if (message.includes("credentials") || message.includes("401") || message.includes("login")) {
-      return NextResponse.json({ error: "Falsche Zugangsdaten. Bitte prüfe Schule, Benutzername und Passwort." }, { status: 401 });
+    if (message.includes("404") || message.includes("not found") || message.includes("school")) {
+      return NextResponse.json({
+        error: `Schule nicht gefunden. Öffne webuntis.com → melde dich an → kopiere den Wert nach "?school=" aus der URL (z.B. "htbla-steyr").`,
+      }, { status: 404 });
     }
-    return NextResponse.json({ error: `Verbindung fehlgeschlagen: ${message}` }, { status: 500 });
+    if (message.includes("credentials") || message.includes("401") || message.includes("login") || message.includes("password")) {
+      return NextResponse.json({ error: "Falsches Passwort oder falscher Benutzername." }, { status: 401 });
+    }
+    if (message.includes("ENOTFOUND") || message.includes("network") || message.includes("ECONNREFUSED")) {
+      return NextResponse.json({ error: `Server "${server}" nicht erreichbar. Bitte den richtigen WebUntis-Server wählen.` }, { status: 503 });
+    }
+    return NextResponse.json({ error: `Fehler: ${message}` }, { status: 500 });
   }
 }
