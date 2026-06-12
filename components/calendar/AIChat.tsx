@@ -12,7 +12,7 @@ interface Message {
   id: string;
   role: "user" | "ai";
   text: string;
-  event?: CalendarEvent;
+  createdEvents?: CalendarEvent[];
   deletedEvents?: CalendarEvent[];
   error?: boolean;
 }
@@ -24,15 +24,16 @@ interface Props {
 }
 
 const SUGGESTIONS = [
-  "Morgen um 10 Uhr Zahnarzt für 1 Stunde",
-  "Nächsten Montag 14 Uhr Meeting mit Sarah",
-  "Lösche den Zahnarzt morgen",
-  "Freitag 9 Uhr Standup löschen",
+  "Füge alle WM 2026 Spiele Österreichs ein",
+  "Morgen 14 Uhr Meeting mit Sarah",
+  "Lösche alle Termine",
+  "Was habe ich nächste Woche?",
 ];
 
 const COLOR_KEYWORDS: Record<string, string> = {
   arbeit: "blue", meeting: "blue", standup: "blue", call: "blue", zoom: "blue",
   sport: "emerald", gym: "emerald", laufen: "emerald", training: "emerald", yoga: "emerald",
+  fußball: "emerald", tennis: "emerald", wm: "emerald", em: "emerald",
   arzt: "rose", zahnarzt: "rose", krank: "rose",
   geburtstag: "amber", party: "amber", feier: "amber",
   urlaub: "sky", reise: "sky", flug: "sky",
@@ -48,20 +49,14 @@ function guessColor(title: string): string {
   return ["blue", "violet", "emerald", "rose", "amber", "sky"][idx];
 }
 
-// Detect delete intent
 const DELETE_PATTERNS = [
-  /lösch[e]?\s+(.+)/i,
-  /entfern[e]?\s+(.+)/i,
-  /streich[e]?\s+(.+)/i,
-  /delete\s+(.+)/i,
-  /(.+)\s+löschen/i,
-  /(.+)\s+entfernen/i,
-  /(.+)\s+streichen/i,
+  /lösch[e]?\s+(.+)/i, /entfern[e]?\s+(.+)/i, /streich[e]?\s+(.+)/i,
+  /(.+)\s+löschen/i, /(.+)\s+entfernen/i,
 ];
 
 function detectDeleteIntent(msg: string): string | null {
-  for (const pattern of DELETE_PATTERNS) {
-    const m = msg.match(pattern);
+  for (const p of DELETE_PATTERNS) {
+    const m = msg.match(p);
     if (m) return m[1].trim();
   }
   return null;
@@ -70,195 +65,169 @@ function detectDeleteIntent(msg: string): string | null {
 function findMatchingEvents(query: string, events: CalendarEvent[]): CalendarEvent[] {
   const lower = query.toLowerCase().trim();
   const words = lower.split(/\s+/).filter((w) => w.length > 2);
-
-  // Try to parse a date from the query
   const draft = parseNaturalLanguage(query);
   const targetDate = draft?.start ?? null;
 
   return events.filter((e) => {
-    // Skip WebUntis school lessons unless explicitly named
-    if (e.id.startsWith("untis_")) {
-      return lower.includes(e.title.toLowerCase());
-    }
-
+    if (e.id.startsWith("untis_") && !lower.includes(e.title.toLowerCase())) return false;
     const titleLower = e.title.toLowerCase();
-
-    // Direct title match
     if (titleLower.includes(lower)) return true;
-
-    // Any word matches title
     const wordMatch = words.some((w) => titleLower.includes(w));
-
-    // Date match: same day as parsed date AND any word in title
-    const dateMatch = targetDate
-      ? isSameDay(parseISO(e.start), targetDate) && wordMatch
-      : false;
-
+    const dateMatch = targetDate ? isSameDay(parseISO(e.start), targetDate) && wordMatch : false;
     return wordMatch || dateMatch;
   });
 }
 
-function formatEventResponse(event: CalendarEvent): string {
-  const start = new Date(event.start);
-  const end = new Date(event.end);
-  const dateStr = format(start, "EEEE, d. MMMM", { locale: de });
-  const timeStr = event.allDay ? "Ganztägig" : `${format(start, "HH:mm")} – ${format(end, "HH:mm")} Uhr`;
-  return `Erledigt! Ich habe „${event.title}" eingetragen:\n📅 ${dateStr}\n⏰ ${timeStr}`;
+function generateId() {
+  return `evt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
 export default function AIChat({ onEventAdded, onEventDeleted, events }: Props) {
   const eventsRef = useRef<CalendarEvent[]>(events);
   useEffect(() => { eventsRef.current = events; }, [events]);
 
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "welcome",
-      role: "ai",
-      text: "Hallo! Ich bin dein KI-Assistent. Ich kann Termine eintragen oder löschen – einfach in normaler Sprache.",
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([{
+    id: "welcome", role: "ai",
+    text: "Hallo! Ich bin dein KI-Assistent – powered by Claude.\n\nIch kann Termine eintragen, löschen und komplexe Anfragen verstehen wie \"Füge alle WM-Spiele ein\" oder \"Was habe ich diese Woche?\"",
+  }]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [minimized, setMinimized] = useState(false);
+  const [aiAvailable, setAiAvailable] = useState<boolean | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+
+  // Check if AI is available
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    fetch("/api/ai/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: "ping", events: [] }),
+    }).then((r) => setAiAvailable(r.ok)).catch(() => setAiAvailable(false));
+  }, []);
+
+  async function handleSendWithAI(msg: string) {
+    try {
+      const res = await fetch("/api/ai/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: msg, events: eventsRef.current.slice(0, 50) }),
+      });
+
+      if (!res.ok) throw new Error("AI nicht verfügbar");
+      const data = await res.json();
+
+      const createdEvents: CalendarEvent[] = [];
+      const deletedEvents: CalendarEvent[] = [];
+
+      for (const action of (data.actions ?? [])) {
+        if (action.type === "create" && action.event) {
+          const newEvt: CalendarEvent = {
+            ...action.event,
+            id: generateId(),
+            color: action.event.color ?? guessColor(action.event.title ?? ""),
+          };
+          onEventAdded(newEvt);
+          createdEvents.push(newEvt);
+        } else if (action.type === "delete" && action.event) {
+          const matches = findMatchingEvents(action.event.title ?? "", eventsRef.current);
+          matches.forEach((e) => { onEventDeleted(e.id); deletedEvents.push(e); });
+        }
+      }
+
+      setMessages((prev) => [...prev, {
+        id: `ai-${Date.now()}`, role: "ai",
+        text: data.message ?? "Erledigt!",
+        createdEvents: createdEvents.length ? createdEvents : undefined,
+        deletedEvents: deletedEvents.length ? deletedEvents : undefined,
+      }]);
+    } catch {
+      // Fallback to local parser
+      await handleSendLocal(msg);
+    }
+  }
+
+  async function handleSendLocal(msg: string) {
+    // DELETE ALL
+    if (/lösch[e]?\s+alles|alles\s+löschen|alle\s+termine|entfern[e]?\s+alle/i.test(msg)) {
+      const all = eventsRef.current;
+      all.forEach((e) => onEventDeleted(e.id));
+      setMessages((prev) => [...prev, { id: `ai-${Date.now()}`, role: "ai", text: `🗑️ Alle ${all.length} Termine gelöscht.`, deletedEvents: all }]);
+      return;
+    }
+    // DELETE STUNDENPLAN
+    if (/stundenplan|webuntis|schulstunden?|unterricht/i.test(msg) && /lösch|entfern|weg/i.test(msg)) {
+      const untis = eventsRef.current.filter((e) => e.id.startsWith("untis_"));
+      untis.forEach((e) => onEventDeleted(e.id));
+      setMessages((prev) => [...prev, { id: `ai-${Date.now()}`, role: "ai", text: `🗑️ Stundenplan gelöscht (${untis.length} Stunden).`, deletedEvents: untis }]);
+      return;
+    }
+    // DELETE single
+    if (/^(lösch|entfern|streich|delete|remove|weg)/i.test(msg.trim())) {
+      const query = detectDeleteIntent(msg);
+      const matches = query ? findMatchingEvents(query, eventsRef.current) : [];
+      if (!matches.length) {
+        setMessages((prev) => [...prev, { id: `ai-${Date.now()}`, role: "ai", error: true, text: "Keinen passenden Termin gefunden." }]);
+        return;
+      }
+      matches.forEach((e) => onEventDeleted(e.id));
+      setMessages((prev) => [...prev, { id: `ai-${Date.now()}`, role: "ai", text: `🗑️ Gelöscht: ${matches.map((e) => `"${e.title}"`).join(", ")}`, deletedEvents: matches }]);
+      return;
+    }
+    // CREATE
+    const draft = parseNaturalLanguage(msg);
+    if (!draft) {
+      setMessages((prev) => [...prev, { id: `ai-${Date.now()}`, role: "ai", error: true, text: "Das habe ich nicht verstanden." }]);
+      return;
+    }
+    const newEvt: CalendarEvent = { id: generateId(), title: draft.title, start: draft.start.toISOString(), end: draft.end.toISOString(), color: guessColor(draft.title), allDay: false };
+    onEventAdded(newEvt);
+    setMessages((prev) => [...prev, {
+      id: `ai-${Date.now()}`, role: "ai",
+      text: `✅ „${newEvt.title}" eingetragen:\n📅 ${format(draft.start, "EEEE, d. MMMM", { locale: de })}\n⏰ ${format(draft.start, "HH:mm")} – ${format(draft.end, "HH:mm")} Uhr`,
+      createdEvents: [newEvt],
+    }]);
+  }
 
   async function handleSend(text?: string) {
     const msg = (text ?? input).trim();
     if (!msg || loading) return;
     setInput("");
-
-    const userMsg: Message = { id: `u-${Date.now()}`, role: "user", text: msg };
-    setMessages((prev) => [...prev, userMsg]);
+    setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", text: msg }]);
     setLoading(true);
+    await new Promise((r) => setTimeout(r, 200));
 
-    await new Promise((r) => setTimeout(r, 350));
-
-    // --- DELETE ALL intent ---
-    if (/lösch[e]?\s+alles|alles\s+löschen|alle\s+termine|entfern[e]?\s+alle|alle\s+entfernen|alles\s+entfernen|lösch[e]?\s+alle|delete\s+all/i.test(msg)) {
-      const all = eventsRef.current;
-      if (all.length === 0) {
-        setMessages((prev) => [...prev, { id: `ai-${Date.now()}`, role: "ai", text: "Es gibt keine Termine zum Löschen." }]);
-        setLoading(false);
-        return;
-      }
-      all.forEach((e) => onEventDeleted(e.id));
-      setMessages((prev) => [...prev, {
-        id: `ai-${Date.now()}`, role: "ai",
-        text: `🗑️ Alle ${all.length} Termine wurden gelöscht.`,
-        deletedEvents: all,
-      }]);
-      setLoading(false);
-      return;
+    if (aiAvailable) {
+      await handleSendWithAI(msg);
+    } else {
+      await handleSendLocal(msg);
     }
-
-    // --- DELETE STUNDENPLAN intent ---
-    if (/stundenplan|webuntis|schulstunden?|unterricht/i.test(msg) && /lösch|entfern|weg|delete|clear/i.test(msg)) {
-      const untisEvents = eventsRef.current.filter((e) => e.id.startsWith("untis_"));
-      if (untisEvents.length === 0) {
-        setMessages((prev) => [...prev, { id: `ai-${Date.now()}`, role: "ai", text: "Es sind keine Stundenplan-Einträge vorhanden." }]);
-        setLoading(false);
-        return;
-      }
-      untisEvents.forEach((e) => onEventDeleted(e.id));
-      setMessages((prev) => [...prev, {
-        id: `ai-${Date.now()}`, role: "ai",
-        text: `🗑️ Stundenplan gelöscht – ${untisEvents.length} Schulstunden entfernt.`,
-        deletedEvents: untisEvents,
-      }]);
-      setLoading(false);
-      return;
-    }
-
-    // --- DELETE single event intent ---
-    const deleteQuery = detectDeleteIntent(msg);
-    if (deleteQuery) {
-      const matches = findMatchingEvents(deleteQuery, eventsRef.current);
-
-      if (matches.length === 0) {
-        setMessages((prev) => [...prev, {
-          id: `ai-${Date.now()}`, role: "ai", error: true,
-          text: `Ich habe keinen Termin gefunden der zu „${deleteQuery}" passt.`,
-        }]);
-        setLoading(false);
-        return;
-      }
-
-      matches.forEach((e) => onEventDeleted(e.id));
-      const names = matches.map((e) => `„${e.title}" (${format(parseISO(e.start), "d. MMM HH:mm", { locale: de })})`).join(", ");
-      setMessages((prev) => [...prev, {
-        id: `ai-${Date.now()}`, role: "ai",
-        text: `🗑️ Gelöscht: ${names}`,
-        deletedEvents: matches,
-      }]);
-      setLoading(false);
-      return;
-    }
-
-    // If message looks like a delete command but nothing matched above → error, don't create
-    if (/^(lösch|entfern|streich|delete|remove|weg)/i.test(msg.trim())) {
-      setMessages((prev) => [...prev, {
-        id: `ai-${Date.now()}`, role: "ai", error: true,
-        text: `Ich habe keinen passenden Termin zum Löschen gefunden.\nTipp: "lösche stundenplan", "lösche alles" oder z.B. "Zahnarzt löschen"`,
-      }]);
-      setLoading(false);
-      return;
-    }
-
-    // --- CREATE intent ---
-    const draft = parseNaturalLanguage(msg);
-    if (!draft) {
-      setMessages((prev) => [...prev, {
-        id: `ai-${Date.now()}`, role: "ai", error: true,
-        text: 'Das habe ich nicht verstanden. Beispiele:\n• "Morgen 14 Uhr Meeting"\n• "Zahnarzt löschen"\n• "Lösche den Sport am Freitag"',
-      }]);
-      setLoading(false);
-      return;
-    }
-
-    const newEvent: Omit<CalendarEvent, "id"> = {
-      title: draft.title,
-      start: draft.start.toISOString(),
-      end: draft.end.toISOString(),
-      color: guessColor(draft.title),
-      allDay: false,
-      description: draft.description,
-    };
-    onEventAdded(newEvent);
-
-    setMessages((prev) => [...prev, {
-      id: `ai-${Date.now()}`, role: "ai",
-      text: formatEventResponse({ ...newEvent, id: "preview" }),
-      event: { ...newEvent, id: "preview" },
-    }]);
     setLoading(false);
   }
 
   return (
     <div className={`flex flex-col bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm transition-all duration-300 ${minimized ? "h-12" : "h-72"}`}>
-      {/* Header */}
-      <div
-        className="flex items-center justify-between px-4 py-2.5 bg-gradient-to-r from-blue-500 to-violet-500 cursor-pointer flex-shrink-0"
-        onClick={() => setMinimized((v) => !v)}
-      >
+      <div className="flex items-center justify-between px-4 py-2.5 bg-gradient-to-r from-blue-500 to-violet-500 cursor-pointer flex-shrink-0"
+        onClick={() => setMinimized((v) => !v)}>
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 bg-white/20 rounded-lg flex items-center justify-center">
             <Sparkles size={12} className="text-white" />
           </div>
           <span className="text-sm font-semibold text-white">KI-Assistent</span>
-          {!minimized && <span className="text-xs text-white/60 hidden sm:block">Termine eintragen oder löschen</span>}
+          {!minimized && aiAvailable !== null && (
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${aiAvailable ? "bg-white/20 text-white" : "bg-white/10 text-white/60"}`}>
+              {aiAvailable ? "Claude AI" : "Basis-Modus"}
+            </span>
+          )}
         </div>
-        <button className="text-white/70 hover:text-white transition-colors">
+        <button className="text-white/70 hover:text-white">
           {minimized ? <Maximize2 size={14} /> : <Minimize2 size={14} />}
         </button>
       </div>
 
       {!minimized && (
         <>
-          {/* Messages */}
           <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
             {messages.map((msg) => (
               <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
@@ -267,45 +236,40 @@ export default function AIChat({ onEventAdded, onEventDeleted, events }: Props) 
                     <Sparkles size={10} className="text-white" />
                   </div>
                 )}
-                <div className="max-w-[80%]">
+                <div className="max-w-[82%] space-y-1.5">
                   <div className={`px-3 py-2 rounded-2xl text-sm whitespace-pre-line ${
-                    msg.role === "user"
-                      ? "bg-blue-500 text-white rounded-br-sm"
-                      : msg.error
-                      ? "bg-rose-50 text-rose-700 rounded-bl-sm"
-                      : "bg-gray-100 text-gray-700 rounded-bl-sm"
+                    msg.role === "user" ? "bg-blue-500 text-white rounded-br-sm"
+                    : msg.error ? "bg-rose-50 text-rose-700 rounded-bl-sm"
+                    : "bg-gray-100 text-gray-700 rounded-bl-sm"
                   }`}>
                     {msg.text}
                   </div>
 
-                  {/* Added event card */}
-                  {msg.event && (
-                    <div className={`mt-1.5 rounded-xl px-3 py-2 border ${getColorById(msg.event.color).light} ${getColorById(msg.event.color).border} ${getColorById(msg.event.color).text}`}>
+                  {/* Created events */}
+                  {msg.createdEvents?.map((e) => (
+                    <div key={e.id} className={`rounded-xl px-3 py-2 border ${getColorById(e.color).light} ${getColorById(e.color).border} ${getColorById(e.color).text}`}>
                       <div className="flex items-center gap-1.5">
-                        <div className={`w-2 h-2 rounded-full ${getColorById(msg.event.color).bg}`} />
-                        <span className="text-xs font-semibold">{msg.event.title}</span>
+                        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${getColorById(e.color).bg}`} />
+                        <span className="text-xs font-semibold truncate">{e.title}</span>
                       </div>
-                      <div className="text-xs opacity-70 mt-0.5">
-                        {format(new Date(msg.event.start), "EEE, d. MMM · HH:mm", { locale: de })} Uhr
+                      <div className="text-[10px] opacity-70 mt-0.5">
+                        {format(new Date(e.start), "EEE, d. MMM · HH:mm", { locale: de })} Uhr
                       </div>
                     </div>
-                  )}
+                  ))}
 
                   {/* Deleted events */}
-                  {msg.deletedEvents && msg.deletedEvents.length > 0 && (
-                    <div className="mt-1.5 space-y-1">
-                      {msg.deletedEvents.map((e) => (
-                        <div key={e.id} className="rounded-xl px-3 py-2 border border-rose-200 bg-rose-50 text-rose-600 flex items-center gap-2">
-                          <Trash2 size={12} />
-                          <div>
-                            <div className="text-xs font-semibold line-through opacity-70">{e.title}</div>
-                            <div className="text-[10px] opacity-60">
-                              {format(parseISO(e.start), "EEE, d. MMM · HH:mm", { locale: de })} Uhr
-                            </div>
-                          </div>
-                        </div>
-                      ))}
+                  {msg.deletedEvents?.slice(0, 5).map((e) => (
+                    <div key={e.id} className="rounded-xl px-3 py-2 border border-rose-200 bg-rose-50 text-rose-600 flex items-center gap-2">
+                      <Trash2 size={11} className="flex-shrink-0" />
+                      <div>
+                        <div className="text-xs font-semibold line-through opacity-70">{e.title}</div>
+                        <div className="text-[10px] opacity-60">{format(parseISO(e.start), "d. MMM · HH:mm", { locale: de })}</div>
+                      </div>
                     </div>
+                  ))}
+                  {(msg.deletedEvents?.length ?? 0) > 5 && (
+                    <div className="text-xs text-rose-400 pl-1">+{(msg.deletedEvents?.length ?? 0) - 5} weitere gelöscht</div>
                   )}
                 </div>
               </div>
@@ -326,7 +290,6 @@ export default function AIChat({ onEventAdded, onEventDeleted, events }: Props) 
             <div ref={bottomRef} />
           </div>
 
-          {/* Suggestions */}
           {messages.length <= 1 && (
             <div className="px-4 pb-2 flex gap-1.5 overflow-x-auto">
               {SUGGESTIONS.map((s, i) => (
@@ -338,15 +301,13 @@ export default function AIChat({ onEventAdded, onEventDeleted, events }: Props) 
             </div>
           )}
 
-          {/* Input */}
           <div className="px-3 pb-3 flex-shrink-0">
             <form onSubmit={(e) => { e.preventDefault(); handleSend(); }}
               className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 focus-within:border-blue-400 focus-within:bg-white transition-all">
               <input
-                type="text"
-                value={input}
+                type="text" value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="Termin eintragen oder löschen…"
+                placeholder={aiAvailable ? "Frag mich alles…" : "Termin eintragen oder löschen…"}
                 disabled={loading}
                 className="flex-1 text-sm bg-transparent outline-none text-gray-700 placeholder-gray-400"
               />
