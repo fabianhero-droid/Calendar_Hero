@@ -137,7 +137,43 @@ export default function AIChat({ onEventAdded, onEventDeleted, events }: Props) 
 
     await new Promise((r) => setTimeout(r, 350));
 
-    // --- DELETE intent ---
+    // --- DELETE ALL intent ---
+    if (/lösch[e]?\s+alles|alles\s+löschen|alle\s+termine\s+löschen|lösch[e]?\s+alle\s+termine/i.test(msg)) {
+      const all = eventsRef.current;
+      if (all.length === 0) {
+        setMessages((prev) => [...prev, { id: `ai-${Date.now()}`, role: "ai", text: "Es gibt keine Termine zum Löschen." }]);
+        setLoading(false);
+        return;
+      }
+      all.forEach((e) => onEventDeleted(e.id));
+      setMessages((prev) => [...prev, {
+        id: `ai-${Date.now()}`, role: "ai",
+        text: `🗑️ Alle ${all.length} Termine wurden gelöscht.`,
+        deletedEvents: all,
+      }]);
+      setLoading(false);
+      return;
+    }
+
+    // --- DELETE STUNDENPLAN intent ---
+    if (/lösch[e]?\s+stundenplan|stundenplan\s+löschen|webuntis\s+löschen|lösch[e]?\s+webuntis|unterricht\s+löschen|lösch[e]?\s+unterricht/i.test(msg)) {
+      const untisEvents = eventsRef.current.filter((e) => e.id.startsWith("untis_"));
+      if (untisEvents.length === 0) {
+        setMessages((prev) => [...prev, { id: `ai-${Date.now()}`, role: "ai", text: "Es sind keine Stundenplan-Einträge vorhanden." }]);
+        setLoading(false);
+        return;
+      }
+      untisEvents.forEach((e) => onEventDeleted(e.id));
+      setMessages((prev) => [...prev, {
+        id: `ai-${Date.now()}`, role: "ai",
+        text: `🗑️ Stundenplan gelöscht – ${untisEvents.length} Schulstunden entfernt.`,
+        deletedEvents: untisEvents,
+      }]);
+      setLoading(false);
+      return;
+    }
+
+    // --- DELETE single event intent ---
     const deleteQuery = detectDeleteIntent(msg);
     if (deleteQuery) {
       const matches = findMatchingEvents(deleteQuery, eventsRef.current);
@@ -152,7 +188,6 @@ export default function AIChat({ onEventAdded, onEventDeleted, events }: Props) 
       }
 
       matches.forEach((e) => onEventDeleted(e.id));
-
       const names = matches.map((e) => `„${e.title}" (${format(parseISO(e.start), "d. MMM HH:mm", { locale: de })})`).join(", ");
       setMessages((prev) => [...prev, {
         id: `ai-${Date.now()}`, role: "ai",
