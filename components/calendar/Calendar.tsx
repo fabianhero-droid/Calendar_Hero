@@ -86,7 +86,11 @@ export default function Calendar() {
 
       {/* Sidebar-like top panel */}
       <div className="px-4 pt-3 pb-2 space-y-2">
-        <AIChat onEventAdded={handleAIChatEvent} />
+        <AIChat
+          onEventAdded={handleAIChatEvent}
+          onEventDeleted={store.deleteEvent}
+          events={store.events}
+        />
         <WebUntisSetup
           onEventsImported={handleUntisImport}
           existingEventIds={store.events.map((e) => e.id)}

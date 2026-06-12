@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Sparkles, Send, Calendar, X, Minimize2, Maximize2 } from "lucide-react";
+import { Sparkles, Send, Minimize2, Maximize2, Trash2 } from "lucide-react";
 import { parseNaturalLanguage } from "@/lib/nlParser";
-import { ParsedEventDraft, CalendarEvent } from "@/lib/types";
-import { EVENT_COLORS, getColorById } from "@/lib/eventColors";
-import { format } from "date-fns";
+import { CalendarEvent } from "@/lib/types";
+import { getColorById } from "@/lib/eventColors";
+import { format, parseISO, isSameDay } from "date-fns";
 import { de } from "date-fns/locale";
 
 interface Message {
@@ -13,26 +13,30 @@ interface Message {
   role: "user" | "ai";
   text: string;
   event?: CalendarEvent;
+  deletedEvents?: CalendarEvent[];
   error?: boolean;
 }
 
 interface Props {
   onEventAdded: (event: Omit<CalendarEvent, "id">) => void;
+  onEventDeleted: (id: string) => void;
+  events: CalendarEvent[];
 }
 
 const SUGGESTIONS = [
   "Morgen um 10 Uhr Zahnarzt für 1 Stunde",
   "Nächsten Montag 14 Uhr Meeting mit Sarah",
-  "Heute 18:30 Uhr Sport für 45 Minuten",
-  "Freitag 9 Uhr Standup für 30 Minuten",
+  "Lösche den Zahnarzt morgen",
+  "Freitag 9 Uhr Standup löschen",
 ];
 
 const COLOR_KEYWORDS: Record<string, string> = {
   arbeit: "blue", meeting: "blue", standup: "blue", call: "blue", zoom: "blue",
   sport: "emerald", gym: "emerald", laufen: "emerald", training: "emerald", yoga: "emerald",
-  arzt: "rose", zahnarzt: "rose", krank: "rose", termin: "violet",
+  arzt: "rose", zahnarzt: "rose", krank: "rose",
   geburtstag: "amber", party: "amber", feier: "amber",
   urlaub: "sky", reise: "sky", flug: "sky",
+  termin: "violet",
 };
 
 function guessColor(title: string): string {
@@ -40,34 +44,70 @@ function guessColor(title: string): string {
   for (const [keyword, color] of Object.entries(COLOR_KEYWORDS)) {
     if (lower.includes(keyword)) return color;
   }
-  // Cycle through colors based on title hash
-  const idx = Math.abs(title.split("").reduce((a, c) => a + c.charCodeAt(0), 0)) % EVENT_COLORS.length;
-  return EVENT_COLORS[idx].id;
+  const idx = Math.abs(title.split("").reduce((a, c) => a + c.charCodeAt(0), 0)) % 6;
+  return ["blue", "violet", "emerald", "rose", "amber", "sky"][idx];
+}
+
+// Detect delete intent
+const DELETE_PATTERNS = [
+  /lösch[e]?\s+(.+)/i,
+  /entfern[e]?\s+(.+)/i,
+  /streich[e]?\s+(.+)/i,
+  /delete\s+(.+)/i,
+  /(.+)\s+löschen/i,
+  /(.+)\s+entfernen/i,
+  /(.+)\s+streichen/i,
+];
+
+function detectDeleteIntent(msg: string): string | null {
+  for (const pattern of DELETE_PATTERNS) {
+    const m = msg.match(pattern);
+    if (m) return m[1].trim();
+  }
+  return null;
+}
+
+function findMatchingEvents(query: string, events: CalendarEvent[]): CalendarEvent[] {
+  const lower = query.toLowerCase();
+
+  // Try to parse a date from the query
+  const draft = parseNaturalLanguage(query);
+  const targetDate = draft?.start ?? null;
+
+  return events.filter((e) => {
+    const titleMatch = e.title.toLowerCase().includes(lower) ||
+      lower.split(" ").some((word) => word.length > 3 && e.title.toLowerCase().includes(word));
+
+    // Also check for date match
+    const dateMatch = targetDate ? isSameDay(parseISO(e.start), targetDate) : false;
+
+    // Skip WebUntis events unless explicitly named
+    if (e.id.startsWith("untis_") && !lower.includes(e.title.toLowerCase())) return false;
+
+    return titleMatch || (dateMatch && lower.split(" ").some((w) => w.length > 3 && e.title.toLowerCase().includes(w)));
+  });
 }
 
 function formatEventResponse(event: CalendarEvent): string {
   const start = new Date(event.start);
   const end = new Date(event.end);
   const dateStr = format(start, "EEEE, d. MMMM", { locale: de });
-  const timeStr = event.allDay
-    ? "Ganztägig"
-    : `${format(start, "HH:mm")} – ${format(end, "HH:mm")} Uhr`;
+  const timeStr = event.allDay ? "Ganztägig" : `${format(start, "HH:mm")} – ${format(end, "HH:mm")} Uhr`;
   return `Erledigt! Ich habe „${event.title}" eingetragen:\n📅 ${dateStr}\n⏰ ${timeStr}`;
 }
 
-export default function AIChat({ onEventAdded }: Props) {
+export default function AIChat({ onEventAdded, onEventDeleted, events }: Props) {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome",
       role: "ai",
-      text: "Hallo! Ich bin dein KI-Kalender-Assistent. Sag mir einfach welchen Termin ich eintragen soll – in normaler Sprache.",
+      text: "Hallo! Ich bin dein KI-Assistent. Ich kann Termine eintragen oder löschen – einfach in normaler Sprache.",
     },
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [minimized, setMinimized] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -82,45 +122,60 @@ export default function AIChat({ onEventAdded }: Props) {
     setMessages((prev) => [...prev, userMsg]);
     setLoading(true);
 
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 350));
 
-    const draft = parseNaturalLanguage(msg);
-    if (!draft) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `ai-${Date.now()}`,
-          role: "ai",
-          text: 'Das habe ich leider nicht verstanden. Versuche es so: "Morgen um 14 Uhr Meeting für 1 Stunde"',
-          error: true,
-        },
-      ]);
+    // --- DELETE intent ---
+    const deleteQuery = detectDeleteIntent(msg);
+    if (deleteQuery) {
+      const matches = findMatchingEvents(deleteQuery, events);
+
+      if (matches.length === 0) {
+        setMessages((prev) => [...prev, {
+          id: `ai-${Date.now()}`, role: "ai", error: true,
+          text: `Ich habe keinen Termin gefunden der zu „${deleteQuery}" passt.`,
+        }]);
+        setLoading(false);
+        return;
+      }
+
+      matches.forEach((e) => onEventDeleted(e.id));
+
+      const names = matches.map((e) => `„${e.title}" (${format(parseISO(e.start), "d. MMM HH:mm", { locale: de })})`).join(", ");
+      setMessages((prev) => [...prev, {
+        id: `ai-${Date.now()}`, role: "ai",
+        text: `🗑️ Gelöscht: ${names}`,
+        deletedEvents: matches,
+      }]);
       setLoading(false);
       return;
     }
 
-    const color = guessColor(draft.title);
+    // --- CREATE intent ---
+    const draft = parseNaturalLanguage(msg);
+    if (!draft) {
+      setMessages((prev) => [...prev, {
+        id: `ai-${Date.now()}`, role: "ai", error: true,
+        text: 'Das habe ich nicht verstanden. Beispiele:\n• "Morgen 14 Uhr Meeting"\n• "Zahnarzt löschen"\n• "Lösche den Sport am Freitag"',
+      }]);
+      setLoading(false);
+      return;
+    }
+
     const newEvent: Omit<CalendarEvent, "id"> = {
       title: draft.title,
       start: draft.start.toISOString(),
       end: draft.end.toISOString(),
-      color,
+      color: guessColor(draft.title),
       allDay: false,
       description: draft.description,
     };
-
     onEventAdded(newEvent);
 
-    const fakeEvent: CalendarEvent = { ...newEvent, id: "preview" };
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: `ai-${Date.now()}`,
-        role: "ai",
-        text: formatEventResponse(fakeEvent),
-        event: fakeEvent,
-      },
-    ]);
+    setMessages((prev) => [...prev, {
+      id: `ai-${Date.now()}`, role: "ai",
+      text: formatEventResponse({ ...newEvent, id: "preview" }),
+      event: { ...newEvent, id: "preview" },
+    }]);
     setLoading(false);
   }
 
@@ -136,9 +191,7 @@ export default function AIChat({ onEventAdded }: Props) {
             <Sparkles size={12} className="text-white" />
           </div>
           <span className="text-sm font-semibold text-white">KI-Assistent</span>
-          {!minimized && (
-            <span className="text-xs text-white/60 hidden sm:block">Termin in natürlicher Sprache eingeben</span>
-          )}
+          {!minimized && <span className="text-xs text-white/60 hidden sm:block">Termine eintragen oder löschen</span>}
         </div>
         <button className="text-white/70 hover:text-white transition-colors">
           {minimized ? <Maximize2 size={14} /> : <Minimize2 size={14} />}
@@ -156,19 +209,18 @@ export default function AIChat({ onEventAdded }: Props) {
                     <Sparkles size={10} className="text-white" />
                   </div>
                 )}
-                <div className={`max-w-[80%] ${msg.role === "user" ? "order-1" : ""}`}>
-                  <div
-                    className={`px-3 py-2 rounded-2xl text-sm whitespace-pre-line ${
-                      msg.role === "user"
-                        ? "bg-blue-500 text-white rounded-br-sm"
-                        : msg.error
-                        ? "bg-rose-50 text-rose-700 rounded-bl-sm"
-                        : "bg-gray-100 text-gray-700 rounded-bl-sm"
-                    }`}
-                  >
+                <div className="max-w-[80%]">
+                  <div className={`px-3 py-2 rounded-2xl text-sm whitespace-pre-line ${
+                    msg.role === "user"
+                      ? "bg-blue-500 text-white rounded-br-sm"
+                      : msg.error
+                      ? "bg-rose-50 text-rose-700 rounded-bl-sm"
+                      : "bg-gray-100 text-gray-700 rounded-bl-sm"
+                  }`}>
                     {msg.text}
                   </div>
-                  {/* Event card */}
+
+                  {/* Added event card */}
                   {msg.event && (
                     <div className={`mt-1.5 rounded-xl px-3 py-2 border ${getColorById(msg.event.color).light} ${getColorById(msg.event.color).border} ${getColorById(msg.event.color).text}`}>
                       <div className="flex items-center gap-1.5">
@@ -180,9 +232,27 @@ export default function AIChat({ onEventAdded }: Props) {
                       </div>
                     </div>
                   )}
+
+                  {/* Deleted events */}
+                  {msg.deletedEvents && msg.deletedEvents.length > 0 && (
+                    <div className="mt-1.5 space-y-1">
+                      {msg.deletedEvents.map((e) => (
+                        <div key={e.id} className="rounded-xl px-3 py-2 border border-rose-200 bg-rose-50 text-rose-600 flex items-center gap-2">
+                          <Trash2 size={12} />
+                          <div>
+                            <div className="text-xs font-semibold line-through opacity-70">{e.title}</div>
+                            <div className="text-[10px] opacity-60">
+                              {format(parseISO(e.start), "EEE, d. MMM · HH:mm", { locale: de })} Uhr
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
+
             {loading && (
               <div className="flex justify-start">
                 <div className="w-6 h-6 bg-gradient-to-br from-blue-500 to-violet-500 rounded-full flex items-center justify-center mr-2 flex-shrink-0">
@@ -200,13 +270,10 @@ export default function AIChat({ onEventAdded }: Props) {
 
           {/* Suggestions */}
           {messages.length <= 1 && (
-            <div className="px-4 pb-2 flex gap-1.5 overflow-x-auto scrollbar-hide">
+            <div className="px-4 pb-2 flex gap-1.5 overflow-x-auto">
               {SUGGESTIONS.map((s, i) => (
-                <button
-                  key={i}
-                  onClick={() => handleSend(s)}
-                  className="text-xs text-blue-600 bg-blue-50 border border-blue-100 rounded-full px-3 py-1.5 hover:bg-blue-100 transition-colors whitespace-nowrap flex-shrink-0"
-                >
+                <button key={i} onClick={() => handleSend(s)}
+                  className="text-xs text-blue-600 bg-blue-50 border border-blue-100 rounded-full px-3 py-1.5 hover:bg-blue-100 transition-colors whitespace-nowrap flex-shrink-0">
                   {s}
                 </button>
               ))}
@@ -215,24 +282,18 @@ export default function AIChat({ onEventAdded }: Props) {
 
           {/* Input */}
           <div className="px-3 pb-3 flex-shrink-0">
-            <form
-              onSubmit={(e) => { e.preventDefault(); handleSend(); }}
-              className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 focus-within:border-blue-400 focus-within:bg-white transition-all"
-            >
+            <form onSubmit={(e) => { e.preventDefault(); handleSend(); }}
+              className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 focus-within:border-blue-400 focus-within:bg-white transition-all">
               <input
-                ref={inputRef}
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="Termin eingeben…"
+                placeholder="Termin eintragen oder löschen…"
                 disabled={loading}
                 className="flex-1 text-sm bg-transparent outline-none text-gray-700 placeholder-gray-400"
               />
-              <button
-                type="submit"
-                disabled={loading || !input.trim()}
-                className="w-7 h-7 bg-blue-500 hover:bg-blue-600 disabled:opacity-40 rounded-lg flex items-center justify-center transition-colors flex-shrink-0"
-              >
+              <button type="submit" disabled={loading || !input.trim()}
+                className="w-7 h-7 bg-blue-500 hover:bg-blue-600 disabled:opacity-40 rounded-lg flex items-center justify-center transition-colors flex-shrink-0">
                 <Send size={13} className="text-white" />
               </button>
             </form>
