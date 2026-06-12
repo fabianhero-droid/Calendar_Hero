@@ -7,7 +7,7 @@ import MonthView from "./MonthView";
 import WeekView from "./WeekView";
 import DayView from "./DayView";
 import EventModal from "./EventModal";
-import AIInput from "./AIInput";
+import AIChat from "./AIChat";
 import PWAInstallPrompt from "@/components/PWAInstallPrompt";
 import { CalendarEvent, ParsedEventDraft } from "@/lib/types";
 
@@ -32,6 +32,13 @@ export default function Calendar() {
   const handleAIParsed = useCallback((draft: ParsedEventDraft) => {
     setModal({ type: "draft", draft });
   }, []);
+
+  const handleAIChatEvent = useCallback(
+    (event: Omit<CalendarEvent, "id">) => {
+      store.addEvent(event);
+    },
+    [store]
+  );
 
   const handleSave = useCallback(
     (eventData: Omit<CalendarEvent, "id"> & { id?: string }) => {
@@ -67,9 +74,9 @@ export default function Calendar() {
         useSupabase={store.useSupabase}
       />
 
-      {/* AI Input */}
+      {/* AI Chat */}
       <div className="px-4 pt-3 pb-2">
-        <AIInput onEventParsed={handleAIParsed} />
+        <AIChat onEventAdded={handleAIChatEvent} />
       </div>
 
       {/* Mobile title */}
