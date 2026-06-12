@@ -26,3 +26,16 @@ alter table push_subscriptions enable row level security;
 
 create policy "Allow all" on events for all using (true) with check (true);
 create policy "Allow all" on push_subscriptions for all using (true) with check (true);
+
+-- WebUntis credentials (for cron-based substitution notifications)
+create table if not exists untis_credentials (
+  id int primary key default 1,
+  school text not null,
+  username text not null,
+  password text not null,
+  server text not null,
+  updated_at timestamptz default now()
+);
+
+alter table untis_credentials enable row level security;
+create policy "Allow all" on untis_credentials for all using (true) with check (true);

@@ -8,8 +8,10 @@ import WeekView from "./WeekView";
 import DayView from "./DayView";
 import EventModal from "./EventModal";
 import AIChat from "./AIChat";
+import WebUntisSetup from "@/components/WebUntisSetup";
 import PWAInstallPrompt from "@/components/PWAInstallPrompt";
 import { CalendarEvent, ParsedEventDraft } from "@/lib/types";
+import { generateId } from "@/lib/storage";
 
 type ModalState =
   | { type: "closed" }
@@ -29,13 +31,19 @@ export default function Calendar() {
     setModal({ type: "edit", event });
   }, []);
 
-  const handleAIParsed = useCallback((draft: ParsedEventDraft) => {
-    setModal({ type: "draft", draft });
-  }, []);
-
   const handleAIChatEvent = useCallback(
     (event: Omit<CalendarEvent, "id">) => {
       store.addEvent(event);
+    },
+    [store]
+  );
+
+  const handleUntisImport = useCallback(
+    (events: CalendarEvent[]) => {
+      // Remove old untis events, add new ones
+      const untisIds = store.events.filter((e) => e.id.startsWith("untis_")).map((e) => e.id);
+      untisIds.forEach((id) => store.deleteEvent(id));
+      events.forEach((e) => store.addEvent(e));
     },
     [store]
   );
@@ -74,16 +82,13 @@ export default function Calendar() {
         useSupabase={store.useSupabase}
       />
 
-      {/* AI Chat */}
-      <div className="px-4 pt-3 pb-2">
+      {/* Sidebar-like top panel */}
+      <div className="px-4 pt-3 pb-2 space-y-2">
         <AIChat onEventAdded={handleAIChatEvent} />
-      </div>
-
-      {/* Mobile title */}
-      <div className="sm:hidden px-4 pb-2">
-        <p className="text-sm font-semibold text-gray-700 capitalize">
-          {new Intl.DateTimeFormat("de-DE", { month: "long", year: "numeric" }).format(store.currentDate)}
-        </p>
+        <WebUntisSetup
+          onEventsImported={handleUntisImport}
+          existingEventIds={store.events.map((e) => e.id)}
+        />
       </div>
 
       {/* Calendar views */}
