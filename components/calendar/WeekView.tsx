@@ -10,6 +10,7 @@ import { getColorById } from "@/lib/eventColors";
 import { useEffect, useRef, useState } from "react";
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
+const VISIBLE_START = 6; // start grid at 6:00
 const SLOT_HEIGHT = 64; // px per hour
 const TIME_COL_W = 56; // px
 
@@ -53,6 +54,7 @@ export default function WeekView({ currentDate, events, onSlotClick, onEventClic
   useEffect(() => {
     const now = new Date();
     const mins = now.getHours() * 60 + now.getMinutes();
+    // Scroll to current time, but minimum to school start (6:00)
     const scrollTo = Math.max(0, (mins / 60) * SLOT_HEIGHT - 150);
     scrollRef.current?.scrollTo({ top: scrollTo, behavior: "smooth" });
   }, []);
@@ -176,18 +178,28 @@ export default function WeekView({ currentDate, events, onSlotClick, onEventClic
                   const start = parseISO(evt.start);
                   const end = parseISO(evt.end);
                   const durationMins = differenceInMinutes(end, start);
+                  const isUntis = evt.id.startsWith("untis_");
+                  // Parse room from description "Lehrer: X · Raum: Y"
+                  const roomMatch = evt.description?.match(/Raum:\s*([^\s·]+)/);
+                  const room = roomMatch?.[1];
+                  const teacherMatch = evt.description?.match(/Lehrer:\s*([^·]+?)(?:\s*·|$)/);
+                  const teacher = teacherMatch?.[1]?.trim();
                   return (
                     <div
                       key={evt.id}
                       style={{ ...style, left: "2px", right: "2px" }}
                       onClick={(e) => { e.stopPropagation(); onEventClick(evt); }}
-                      className={`absolute ${c.light} ${c.text} ${c.border} border-l-2 rounded-lg px-1.5 py-1 cursor-pointer hover:opacity-80 transition-opacity overflow-hidden select-none`}
+                      className={`absolute ${c.light} ${c.text} ${c.border} border-l-2 rounded-lg px-1.5 py-0.5 cursor-pointer hover:opacity-80 transition-opacity overflow-hidden select-none`}
                     >
-                      <div className="text-xs font-semibold truncate leading-tight">{evt.title}</div>
-                      {durationMins >= 45 && (
-                        <div className="text-[10px] opacity-70 mt-0.5">
-                          {format(start, "HH:mm")} – {format(end, "HH:mm")}
-                        </div>
+                      <div className="text-[11px] font-bold truncate leading-tight mt-0.5">{evt.title}</div>
+                      <div className="text-[10px] opacity-75 font-medium">
+                        {format(start, "HH:mm")}–{format(end, "HH:mm")}
+                      </div>
+                      {durationMins >= 45 && room && (
+                        <div className="text-[10px] opacity-60 truncate">📍 {room}</div>
+                      )}
+                      {durationMins >= 60 && teacher && !isUntis === false && (
+                        <div className="text-[10px] opacity-50 truncate">{teacher}</div>
                       )}
                     </div>
                   );

@@ -78,9 +78,14 @@ export default function MonthView({ currentDate, events, onDayClick, onEventClic
                       className={`${c.light} ${c.text} text-xs px-1.5 py-0.5 rounded-md truncate cursor-pointer hover:opacity-80 transition-opacity font-medium`}
                     >
                       {!evt.allDay && (
-                        <span className="opacity-60 mr-1">{format(parseISO(evt.start), "HH:mm")}</span>
+                        <span className="font-bold mr-1">{format(parseISO(evt.start), "HH:mm")}</span>
                       )}
                       {evt.title}
+                      {evt.description?.match(/Raum:\s*(\S+)/) && (
+                        <span className="opacity-50 ml-1 text-[10px]">
+                          {evt.description.match(/Raum:\s*(\S+)/)?.[1]}
+                        </span>
+                      )}
                     </div>
                   );
                 })}

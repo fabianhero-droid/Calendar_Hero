@@ -157,17 +157,24 @@ export default function DayView({ currentDate, events, onSlotClick, onEventClick
                   onClick={(e) => { e.stopPropagation(); onEventClick(evt); }}
                   className={`absolute ${c.light} ${c.text} ${c.border} border-l-[3px] rounded-xl px-3 py-2 cursor-pointer hover:opacity-80 transition-opacity overflow-hidden select-none`}
                 >
-                  <div className="text-sm font-semibold leading-tight">{evt.title}</div>
-                  <div className="text-xs opacity-70 mt-0.5 font-medium">
+                  <div className="text-sm font-bold leading-tight">{evt.title}</div>
+                  <div className="text-xs opacity-75 mt-0.5 font-medium">
                     {format(start, "HH:mm")} – {format(end, "HH:mm")} Uhr
-                    {durationMins >= 60 && (
-                      <span className="ml-1.5 opacity-60">
-                        ({durationMins >= 60 ? `${Math.floor(durationMins / 60)}h${durationMins % 60 > 0 ? ` ${durationMins % 60}min` : ""}` : `${durationMins}min`})
-                      </span>
-                    )}
+                    <span className="ml-1.5 opacity-60">
+                      ({Math.floor(durationMins / 60) > 0 ? `${Math.floor(durationMins / 60)}h` : ""}{durationMins % 60 > 0 ? ` ${durationMins % 60}min` : ""})
+                    </span>
                   </div>
-                  {evt.description && durationMins >= 60 && (
-                    <div className="text-xs opacity-50 mt-1 truncate">{evt.description}</div>
+                  {evt.description && (
+                    <div className="text-xs opacity-60 mt-1 space-y-0.5">
+                      {evt.description.split(" · ").map((part, i) => (
+                        <div key={i} className="flex items-center gap-1">
+                          {part.startsWith("Raum:") && <span>📍</span>}
+                          {part.startsWith("Lehrer:") && <span>👤</span>}
+                          {part.startsWith("⚠️") && <span></span>}
+                          <span>{part.replace(/^(Raum:|Lehrer:)\s*/, "")}</span>
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
               );

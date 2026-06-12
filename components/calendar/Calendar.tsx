@@ -44,6 +44,8 @@ export default function Calendar() {
       const untisIds = store.events.filter((e) => e.id.startsWith("untis_")).map((e) => e.id);
       untisIds.forEach((id) => store.deleteEvent(id));
       events.forEach((e) => store.addEvent(e));
+      // Switch to week view so the timetable is visible properly
+      store.setView("week");
     },
     [store]
   );
