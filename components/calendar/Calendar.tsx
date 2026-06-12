@@ -8,6 +8,7 @@ import WeekView from "./WeekView";
 import DayView from "./DayView";
 import EventModal from "./EventModal";
 import AIInput from "./AIInput";
+import PWAInstallPrompt from "@/components/PWAInstallPrompt";
 import { CalendarEvent, ParsedEventDraft } from "@/lib/types";
 
 type ModalState =
@@ -47,8 +48,9 @@ export default function Calendar() {
 
   if (!store.hydrated) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+      <div className="flex flex-col items-center justify-center h-full gap-3">
+        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm text-gray-400">Kalender wird geladen…</p>
       </div>
     );
   }
@@ -61,6 +63,8 @@ export default function Calendar() {
         onNavigate={store.navigate}
         onToday={store.goToday}
         onViewChange={store.setView}
+        onNewEvent={() => setModal({ type: "create", defaultStart: new Date() })}
+        useSupabase={store.useSupabase}
       />
 
       {/* AI Input */}
@@ -68,7 +72,14 @@ export default function Calendar() {
         <AIInput onEventParsed={handleAIParsed} />
       </div>
 
-      {/* Calendar view */}
+      {/* Mobile title */}
+      <div className="sm:hidden px-4 pb-2">
+        <p className="text-sm font-semibold text-gray-700 capitalize">
+          {new Intl.DateTimeFormat("de-DE", { month: "long", year: "numeric" }).format(store.currentDate)}
+        </p>
+      </div>
+
+      {/* Calendar views */}
       <div className="flex-1 overflow-hidden">
         {store.view === "month" && (
           <MonthView
@@ -125,6 +136,8 @@ export default function Calendar() {
           onClose={closeModal}
         />
       )}
+
+      <PWAInstallPrompt />
     </div>
   );
 }

@@ -8,6 +8,7 @@ export interface CalendarEvent {
   end: string; // ISO string
   color?: string;
   allDay?: boolean;
+  remindMinutes?: number; // minutes before event to send push
 }
 
 export interface ParsedEventDraft {
