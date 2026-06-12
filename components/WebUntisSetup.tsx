@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { BookOpen, Loader2, Check, X, RefreshCw, Trash2, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { BookOpen, Loader2, Check, RefreshCw, Trash2, AlertTriangle, ChevronDown, ChevronUp, Search } from "lucide-react";
 import { CalendarEvent } from "@/lib/types";
 
 interface UntisCredentials {
@@ -10,6 +10,13 @@ interface UntisCredentials {
   password: string;
   server: string;
   weeksAhead: number;
+}
+
+interface SchoolResult {
+  name: string;
+  loginName: string;
+  server: string;
+  address: string;
 }
 
 const CREDS_KEY = "untis_credentials";
@@ -40,6 +47,10 @@ export default function WebUntisSetup({ onEventsImported, existingEventIds }: Pr
   const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
+  const [schoolQuery, setSchoolQuery] = useState("");
+  const [schoolResults, setSchoolResults] = useState<SchoolResult[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem(CREDS_KEY);
@@ -99,6 +110,27 @@ export default function WebUntisSetup({ onEventsImported, existingEventIds }: Pr
     setLoading(false);
   }
 
+  function handleSchoolSearch(q: string) {
+    setSchoolQuery(q);
+    if (searchTimeout.current) clearTimeout(searchTimeout.current);
+    if (q.length < 2) { setSchoolResults([]); return; }
+    setSearchLoading(true);
+    searchTimeout.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/webuntis/search?q=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        setSchoolResults(data.schools ?? []);
+      } catch {}
+      setSearchLoading(false);
+    }, 350);
+  }
+
+  function selectSchool(school: SchoolResult) {
+    setCreds((c) => ({ ...c, school: school.loginName, server: school.server }));
+    setSchoolQuery(school.name);
+    setSchoolResults([]);
+  }
+
   function handleDisconnect() {
     localStorage.removeItem(CREDS_KEY);
     localStorage.removeItem("untis_last_sync");
@@ -141,18 +173,40 @@ export default function WebUntisSetup({ onEventsImported, existingEventIds }: Pr
       {open && (
         <div className="border-t border-gray-100 px-4 py-4 space-y-3 bg-gray-50/50">
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-500">Schule (URL-Kürzel)</label>
-              <input
-                type="text"
-                placeholder="z.B. htbla-steyr"
-                value={creds.school}
-                onChange={(e) => setCreds((c) => ({ ...c, school: e.target.value }))}
-                className="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-blue-400 bg-white transition-colors"
-              />
-              <p className="text-[10px] text-blue-500">
-                WebUntis öffnen → URL → Wert nach <code className="bg-blue-50 px-1 rounded">?school=</code>
-              </p>
+            <div className="space-y-1 relative">
+              <label className="text-xs font-medium text-gray-500">Schule suchen</label>
+              <div className="relative">
+                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="z.B. HTBLA Steyr"
+                  value={schoolQuery}
+                  onChange={(e) => handleSchoolSearch(e.target.value)}
+                  className="w-full text-sm border border-gray-200 rounded-xl pl-8 pr-3 py-2 outline-none focus:border-blue-400 bg-white transition-colors"
+                />
+                {searchLoading && (
+                  <Loader2 size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 animate-spin" />
+                )}
+              </div>
+              {/* Dropdown */}
+              {schoolResults.length > 0 && (
+                <div className="absolute z-30 left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden">
+                  {schoolResults.map((s, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => selectSchool(s)}
+                      className="w-full text-left px-3 py-2.5 hover:bg-blue-50 transition-colors border-b border-gray-50 last:border-0"
+                    >
+                      <div className="text-xs font-semibold text-gray-800">{s.name}</div>
+                      <div className="text-[10px] text-gray-400">{s.address} · {s.server}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {creds.school && (
+                <p className="text-[10px] text-emerald-600 font-medium">✓ Kürzel: {creds.school}</p>
+              )}
             </div>
             <div className="space-y-1">
               <label className="text-xs font-medium text-gray-500">Benutzername</label>

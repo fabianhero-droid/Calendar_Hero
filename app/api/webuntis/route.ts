@@ -102,7 +102,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Falsches Passwort oder falscher Benutzername." }, { status: 401 });
     }
     if (message.includes("ENOTFOUND") || message.includes("network") || message.includes("ECONNREFUSED")) {
-      return NextResponse.json({ error: `Server "${server}" nicht erreichbar. Bitte den richtigen WebUntis-Server wählen.` }, { status: 503 });
+      return NextResponse.json({ error: "Server nicht erreichbar. Bitte den richtigen WebUntis-Server wählen." }, { status: 503 });
     }
     return NextResponse.json({ error: `Fehler: ${message}` }, { status: 500 });
   }
