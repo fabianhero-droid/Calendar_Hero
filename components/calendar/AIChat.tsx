@@ -138,7 +138,7 @@ export default function AIChat({ onEventAdded, onEventDeleted, events }: Props) 
     await new Promise((r) => setTimeout(r, 350));
 
     // --- DELETE ALL intent ---
-    if (/lösch[e]?\s+alles|alles\s+löschen|alle\s+termine\s+löschen|lösch[e]?\s+alle\s+termine/i.test(msg)) {
+    if (/lösch[e]?\s+alles|alles\s+löschen|alle\s+termine|entfern[e]?\s+alle|alle\s+entfernen|alles\s+entfernen|lösch[e]?\s+alle|delete\s+all/i.test(msg)) {
       const all = eventsRef.current;
       if (all.length === 0) {
         setMessages((prev) => [...prev, { id: `ai-${Date.now()}`, role: "ai", text: "Es gibt keine Termine zum Löschen." }]);
@@ -156,7 +156,7 @@ export default function AIChat({ onEventAdded, onEventDeleted, events }: Props) 
     }
 
     // --- DELETE STUNDENPLAN intent ---
-    if (/lösch[e]?\s+stundenplan|stundenplan\s+löschen|webuntis\s+löschen|lösch[e]?\s+webuntis|unterricht\s+löschen|lösch[e]?\s+unterricht/i.test(msg)) {
+    if (/stundenplan|webuntis|schulstunden?|unterricht/i.test(msg) && /lösch|entfern|weg|delete|clear/i.test(msg)) {
       const untisEvents = eventsRef.current.filter((e) => e.id.startsWith("untis_"));
       if (untisEvents.length === 0) {
         setMessages((prev) => [...prev, { id: `ai-${Date.now()}`, role: "ai", text: "Es sind keine Stundenplan-Einträge vorhanden." }]);
@@ -193,6 +193,16 @@ export default function AIChat({ onEventAdded, onEventDeleted, events }: Props) 
         id: `ai-${Date.now()}`, role: "ai",
         text: `🗑️ Gelöscht: ${names}`,
         deletedEvents: matches,
+      }]);
+      setLoading(false);
+      return;
+    }
+
+    // If message looks like a delete command but nothing matched above → error, don't create
+    if (/^(lösch|entfern|streich|delete|remove|weg)/i.test(msg.trim())) {
+      setMessages((prev) => [...prev, {
+        id: `ai-${Date.now()}`, role: "ai", error: true,
+        text: `Ich habe keinen passenden Termin zum Löschen gefunden.\nTipp: "lösche stundenplan", "lösche alles" oder z.B. "Zahnarzt löschen"`,
       }]);
       setLoading(false);
       return;
